@@ -1,6 +1,111 @@
 {% extends 'base.html' %}
-{% block title %}<title>Titulo</title>{% endblock %}
+{% block title %}<title>Monitor de Conectividad Digital · SLA & KPI</title>{% endblock %}
 
 {% block content %}
+<div class="color-sweep-bar" aria-hidden="true"></div>
 
+<!-- ============ ENCABEZADO ============ -->
+<header class="top">
+  <div class="brand">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0E1116" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12" y2="20"></line>
+      </svg>
+    </div>
+    <div>
+      <h1>Monitor de Conectividad Digital</h1>
+      <p>Brecha digital · SLA &amp; KPI · Arquitectura y Almacenamiento de Datos</p>
+    </div>
+  </div>
+  <div class="top-right">
+    <div class="feed demo" id="feed"><span class="led"></span><span id="feedText">conectando con la API…</span></div>
+    <button class="btn" id="refreshBtn" onclick="loadAll()" aria-label="Actualizar datos">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      Actualizar
+    </button>
+  </div>
+</header>
+
+<!-- ============ TIRA SLA (5 dimensiones + global) ============ -->
+<section class="sla-strip" aria-label="Estado del SLA del sistema">
+  <div class="head">
+    <h2>Estado del sistema · SLA</h2>
+    <div class="global-pill" id="globalPill"><span class="led"></span><span id="globalTxt">Global</span></div>
+  </div>
+  <div class="sla-grid" id="slaGrid"></div>
+</section>
+
+<!-- ============ HERO: KPI PRINCIPAL (brecha digital) ============ -->
+<section class="hero">
+  <div class="card hero-main">
+    <div>
+      <div class="eyebrow"><span class="led" id="heroLed"></span> KPI principal · Índice de brecha digital</div>
+      <div class="hero-num"><span id="heroVal">—</span><small>%</small></div>
+      <p class="hero-desc" id="heroDesc">Cargando indicador…</p>
+    </div>
+    <div class="hero-foot">
+      <div class="item"><div class="k">Grupo afectado</div><div class="v" id="heroGrupo">—</div></div>
+      <div class="item"><div class="k">Su velocidad</div><div class="v" id="heroVelRango">—</div></div>
+      <div class="item"><div class="k">Media general</div><div class="v" id="heroMedia">—</div></div>
+    </div>
+  </div>
+  <div class="hero-aside">
+    <div class="card">
+      <h3>Velocidad de bajada por rango etario</h3>
+      <p>Mbps promedio · GROUP BY rango</p>
+      <div class="mini-chart"><canvas id="velChart"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ KPI CARDS ============ -->
+<section class="kpis" aria-label="Indicadores de dominio">
+  <div class="card kpi" id="kpiAcceso"></div>
+  <div class="card kpi" id="kpiVolumen"></div>
+  <div class="card kpi" id="kpiCompletitud"></div>
+  <div class="card kpi" id="kpiLatencia"></div>
+</section>
+
+<!-- ============ GRÁFICOS ============ -->
+<section class="charts">
+  <div class="card chart-card">
+    <h3>Distribución por tipo de conexión</h3>
+    <p>COUNT + GROUP BY · /distribucion</p>
+    <div class="chart-box"><canvas id="distChart"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <h3>Histórico de completitud</h3>
+    <p>Últimos 10 ciclos ETL · /historico</p>
+    <div class="chart-box"><canvas id="histChart"></canvas></div>
+  </div>
+</section>
+
+<section class="charts">
+  <div class="card chart-card">
+    <h3>Horas diarias de uso por rango etario</h3>
+    <p>AVG horas_uso · GROUP BY rango</p>
+    <div class="chart-box"><canvas id="horasChart"></canvas></div>
+  </div>
+  <!-- ============ TABLA CALIDAD DE DATOS ============ -->
+  <div class="card quality">
+    <h3>Calidad de datos por campo</h3>
+    <p>Completitud / nulos · /completitud</p>
+    <table>
+      <thead><tr><th>Campo</th><th class="r">Completitud</th><th class="r">Nulos</th></tr></thead>
+      <tbody id="qualityBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ NOTA DE DESPLIEGUE ============ -->
+<div class="note">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+  <div>
+    Los KPIs se calculan en la API Flask (<code>/sla</code>, <code>/kpi_principal</code>, <code>/distribucion</code>, <code>/completitud</code>, <code>/historico</code>) consultando el DWH en MySQL. Si la base de datos no responde, el panel muestra <strong>datos demo realistas</strong> para que nunca quede en blanco.
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

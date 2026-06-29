@@ -2,19 +2,25 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="author" content="Javier Mendez">
-    <meta name="description" content="Convertidor de YouTube a audio con descarga local">
+    <meta name="description" content="Monitor de Conectividad Digital — SLA & KPI sobre la brecha digital">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#b30000">
-    {% block title %}{% endblock %}
+    <meta name="theme-color" content="#0E1116">
+    {% block title %}<title>Monitor de Conectividad Digital</title>{% endblock %}
+
+    <!-- Tipografías IBM Plex (técnica) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/base.css') }}" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Chart.js para los gráficos del dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
 </head>
 <body>
-    
+
     {% block content %}{% endblock %}
-  
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>
