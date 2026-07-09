@@ -23,7 +23,7 @@ def _config():
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_NAME", "dwh_conectividad"),
+        database=os.getenv("DB_NAME", "monitor_conectividad_dwh"),
         charset="utf8mb4",
         cursorclass=DictCursor,
         connect_timeout=4,
@@ -40,7 +40,9 @@ def query_all(sql, params=None):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, params or ())
+            # Sólo se pasan params si existen: así PyMySQL no intenta interpolar
+            # y los '%' literales de las cláusulas LIKE no rompen la consulta.
+            cur.execute(sql, params) if params else cur.execute(sql)
             return cur.fetchall()
     finally:
         conn.close()
@@ -51,7 +53,7 @@ def query_one(sql, params=None):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, params or ())
+            cur.execute(sql, params) if params else cur.execute(sql)
             return cur.fetchone()
     finally:
         conn.close()

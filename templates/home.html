@@ -101,11 +101,11 @@
 <div class="note">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
   <div>
-    Los KPIs se calculan en la API Flask (<code>/sla</code>, <code>/kpi_principal</code>, <code>/distribucion</code>, <code>/completitud</code>, <code>/historico</code>) consultando el DWH en MySQL. Si la base de datos no responde, el panel muestra <strong>datos demo realistas</strong> para que nunca quede en blanco.
+    Los KPIs se calculan en la API Flask (<code>/sla</code>, <code>/kpi_principal</code>, <code>/distribucion</code>, <code>/completitud</code>, <code>/historico</code>) consultando el DWH en MySQL. Todos los valores provienen exclusivamente de la base de datos local; si algún endpoint no responde, esa sección muestra <strong>«sin datos desde la BD»</strong>.
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('dashboard_js') }}"></script>
 {% endblock %}
