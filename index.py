@@ -31,7 +31,7 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "K3W$k3!sdi#k29asdk@xw92d2asd@!ad
 UMBRAL_UPTIME = 99.0      # %   (mayor es mejor)
 UMBRAL_FRESHNESS = 20     # días (menor es mejor)
 UMBRAL_COMPLETITUD = 97.0 # %   (mayor es mejor)
-UMBRAL_LATENCIA = 2.0     # min (menor es mejor)
+UMBRAL_LATENCIA = 5000    # ms  (menor es mejor) — ajústalo al SLA real de tu ETL
 UMBRAL_ERROR = 0.5        # %   (menor es mejor)
 
 # Orden natural de los rangos etarios tal como los siembra el README.
@@ -39,6 +39,11 @@ ORDEN_RANGOS = (
     "FIELD(re.rango,'Adolescente','Joven Adulto','Adulto Joven',"
     "'Adulto Medio','Adulto Mayor','Persona Mayor')"
 )
+
+# Señal de acceso a internet: la columna tiene_acceso del hecho (0/1), que el
+# ETL ya marca correctamente. Requiere el alias f (fact_conectividad).
+SQL_CON_ACCESO = "(f.tiene_acceso = 1)"
+SQL_SIN_ACCESO = "(f.tiene_acceso = 0)"
 
 # Pentaho escribe UNA fila en log_etl por ejecución completa del ETL y deja
 # `registros_actualizados` en NULL, por eso toda la aritmética envuelve las
@@ -109,15 +114,16 @@ def _completitud_campos():
                                (relación N:M que sí puede faltar).
     """
     fila = db.query_one(
-        """
+        f"""
         SELECT
             COUNT(*)                                              AS total,
+            SUM({SQL_CON_ACCESO})                                 AS total_acceso,
             SUM(re.rango_etario_key   IS NOT NULL)                AS edad,
             SUM(tc.tipo_conexion_key  IS NOT NULL)                AS tipo_conexion,
             SUM(f.velocidad_bajada IS NOT NULL AND f.velocidad_bajada >= 0) AS velocidad_bajada,
             SUM(f.velocidad_subida IS NOT NULL AND f.velocidad_subida >= 0) AS velocidad_subida,
             SUM(f.horas_uso_diario IS NOT NULL AND f.horas_uso_diario >= 0) AS horas_uso,
-            SUM(pp.FK_conectividad    IS NOT NULL)                AS proposito_uso
+            SUM({SQL_CON_ACCESO} AND pp.FK_conectividad IS NOT NULL) AS proposito_uso
         FROM fact_conectividad f
         LEFT JOIN dim_rango_etario  re ON re.rango_etario_key  = f.FK_rango_etario
         LEFT JOIN dim_tipo_conexion tc ON tc.tipo_conexion_key = f.FK_tipo_conexion
@@ -127,13 +133,20 @@ def _completitud_campos():
         """
     )
     total = fila["total"] or 0
+    total_acceso = fila["total_acceso"] or 0
+    # proposito_uso sólo aplica a quien tiene internet (sin acceso -> sin
+    # propósito de uso, y eso NO cuenta como dato faltante).
     campos_def = [
-        "edad", "tipo_conexion", "velocidad_bajada",
-        "velocidad_subida", "horas_uso", "proposito_uso",
+        ("edad", total),
+        ("tipo_conexion", total),
+        ("velocidad_bajada", total),
+        ("velocidad_subida", total),
+        ("horas_uso", total),
+        ("proposito_uso", total_acceso),
     ]
     campos = []
-    for nombre in campos_def:
-        pct = (float(fila[nombre]) / total * 100) if total else 0.0
+    for nombre, denom in campos_def:
+        pct = (float(fila[nombre]) / float(denom) * 100) if denom else 0.0
         campos.append({
             "campo": nombre,
             "completitud": r(pct),
@@ -174,14 +187,18 @@ def kpi_principal():
       - Horas de uso por rango    (AVG + GROUP BY)   -> horas_rango
     """
     try:
+        # Promedios por rango SÓLO de quienes tienen acceso (los sin internet
+        # tienen velocidad 0 y distorsionarían el promedio). 'promedio' =
+        # velocidad_promedio del hecho = (bajada + subida) / 2 de cada persona.
         vel = db.query_all(
             f"""
             SELECT re.rango AS rango,
-                   AVG(f.velocidad_bajada) AS download,
-                   AVG(f.velocidad_subida) AS upload
+                   AVG(f.velocidad_bajada)   AS download,
+                   AVG(f.velocidad_subida)   AS upload,
+                   AVG(f.velocidad_promedio) AS promedio
             FROM fact_conectividad f
-            JOIN dim_rango_etario re ON re.rango_etario_key = f.FK_rango_etario
-            WHERE f.tiene_acceso = 1
+            JOIN dim_rango_etario   re ON re.rango_etario_key  = f.FK_rango_etario
+            WHERE {SQL_CON_ACCESO}
             GROUP BY re.rango
             ORDER BY {ORDEN_RANGOS}
             """
@@ -190,32 +207,34 @@ def kpi_principal():
             f"""
             SELECT re.rango AS rango, AVG(f.horas_uso_diario) AS horas
             FROM fact_conectividad f
-            JOIN dim_rango_etario re ON re.rango_etario_key = f.FK_rango_etario
+            JOIN dim_rango_etario   re ON re.rango_etario_key  = f.FK_rango_etario
+            WHERE {SQL_CON_ACCESO}
             GROUP BY re.rango
             ORDER BY {ORDEN_RANGOS}
             """
         )
         agg = db.query_one(
-            """
+            f"""
             SELECT
                 COUNT(*) AS volumen,
-                AVG(CASE WHEN tiene_acceso = 1 THEN velocidad_bajada END) AS media,
-                AVG(CASE WHEN tiene_acceso = 0 THEN 1.0 ELSE 0.0 END) * 100 AS pct_sin_acceso
-            FROM fact_conectividad
+                AVG(CASE WHEN {SQL_CON_ACCESO} THEN f.velocidad_promedio END) AS media,
+                AVG(CASE WHEN {SQL_SIN_ACCESO} THEN 1.0 ELSE 0.0 END) * 100 AS pct_sin_acceso
+            FROM fact_conectividad f
             """
         )
 
         media = r(agg["media"])
         velocidad_rango = [
-            {"rango": v["rango"], "download": r(v["download"]), "upload": r(v["upload"])}
+            {"rango": v["rango"], "download": r(v["download"]),
+             "upload": r(v["upload"]), "promedio": r(v["promedio"])}
             for v in vel
         ]
         horas_rango = [{"rango": h["rango"], "horas": r(h["horas"])} for h in horas]
 
-        # Grupo con menor velocidad de bajada = más afectado por la brecha.
+        # Grupo con menor velocidad promedio = más afectado por la brecha.
         if velocidad_rango:
-            peor = min(velocidad_rango, key=lambda x: x["download"])
-            grupo, vel_grupo = peor["rango"], peor["download"]
+            peor = min(velocidad_rango, key=lambda x: x["promedio"])
+            grupo, vel_grupo = peor["rango"], peor["promedio"]
         else:
             grupo, vel_grupo = "—", 0.0
 
@@ -317,10 +336,10 @@ def sla():
     * freshness (días): antigüedad del dato más reciente en el hecho
                         = DATEDIFF(hoy, MAX(dim_fecha_carga.fecha)).
     * completitud (%) : promedio de completitud por campo (ver /completitud).
-    * latencia (min)  : duración de extremo a extremo del último lote ETL
-                        = (MAX(fecha_fin) - MIN(fecha_inicio)) del lote más
-                        reciente, en minutos.
-    * error (%)       : tasa de error del último lote
+    * latencia (ms)   : duración de la última ejecución del ETL
+                        = (fecha_fin - fecha_inicio) de la corrida más reciente,
+                        en milisegundos (necesita DATETIME(3), ver README).
+    * error (%)       : tasa de error agregada de TODAS las ejecuciones
                         = 100 * SUM(registros_error) / SUM(leídos).
     """
     try:
@@ -334,26 +353,32 @@ def sla():
         )
         dias = int(fresh["dias"]) if fresh and fresh["dias"] is not None else 0
 
-        # --- Latencia y tasa de error de la ÚLTIMA ejecución del ETL ---
-        # Cada fila de log_etl es una corrida completa; se toma la más reciente.
-        lote = db.query_one(
-            f"""
-            SELECT
-                TIMESTAMPDIFF(SECOND, fecha_inicio, fecha_fin) AS segundos,
-                COALESCE(registros_error,0)  AS errores,
-                {SQL_ETL_LEIDOS}             AS leidos
+        # --- Latencia de la ÚLTIMA ejecución del ETL, en milisegundos ---
+        # Requiere que fecha_inicio/fecha_fin tengan precisión de fracción de
+        # segundo (DATETIME(3)); si son DATETIME normales e iguales, dará 0.
+        lat = db.query_one(
+            """
+            SELECT TIMESTAMPDIFF(MICROSECOND, fecha_inicio, fecha_fin) / 1000.0 AS ms
             FROM log_etl
             WHERE fecha_fin IS NOT NULL
             ORDER BY fecha_fin DESC, log_etl_key DESC
             LIMIT 1
             """
         )
-        if lote and lote["segundos"] is not None:
-            latencia_min = r(float(lote["segundos"]) / 60.0, 1)
-            leidos = lote["leidos"] or 0
-            tasa_error = r((float(lote["errores"] or 0) / leidos * 100) if leidos else 0.0)
-        else:
-            latencia_min, tasa_error = 0.0, 0.0
+        latencia_ms = int(round(lat["ms"])) if lat and lat["ms"] is not None else 0
+
+        # --- Tasa de error del ETL: agregada sobre TODAS las ejecuciones ---
+        # (no sólo la última) para que un fallo se refleje aunque la última
+        # corrida haya sido exitosa.
+        err = db.query_one(
+            f"""
+            SELECT SUM(COALESCE(registros_error,0)) AS errores,
+                   SUM({SQL_ETL_LEIDOS})            AS leidos
+            FROM log_etl
+            """
+        )
+        leidos = float(err["leidos"] or 0) if err else 0.0
+        tasa_error = r((float(err["errores"] or 0) / leidos * 100) if leidos else 0.0)
 
         # --- Uptime: % de ejecuciones del ETL sin error (sobre todo el historial) ---
         up = db.query_one(
@@ -374,8 +399,8 @@ def sla():
                           "dir": "max", "estado": estado_max(dias, UMBRAL_FRESHNESS)},
             "completitud": {"valor": global_pct, "umbral": UMBRAL_COMPLETITUD, "unidad": "%",
                             "dir": "min", "estado": estado_min(global_pct, UMBRAL_COMPLETITUD)},
-            "latencia": {"valor": latencia_min, "umbral": UMBRAL_LATENCIA, "unidad": " min",
-                         "dir": "max", "estado": estado_max(latencia_min, UMBRAL_LATENCIA)},
+            "latencia": {"valor": latencia_ms, "umbral": UMBRAL_LATENCIA, "unidad": " ms",
+                         "dir": "max", "estado": estado_max(latencia_ms, UMBRAL_LATENCIA)},
             "error": {"valor": tasa_error, "umbral": UMBRAL_ERROR, "unidad": "%",
                       "dir": "max", "estado": estado_max(tasa_error, UMBRAL_ERROR)},
         }
