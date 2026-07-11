@@ -1,10 +1,17 @@
 """Monitor de Conectividad Digital — API REST + Dashboard (Flask).
 
-Sirve el tablero web y expone los 5 endpoints que consume el dashboard. Cada
-endpoint ejecuta consultas SQL sobre el Data Warehouse (esquema estrella en
-MySQL local, BD `monitor_conectividad_dwh`) y devuelve JSON. Si el DWH no está
-disponible, el endpoint responde 503 y el front-end cae automáticamente a sus
-datos demo (nunca queda en blanco).
+Sirve el tablero web (ruta /) y expone los 5 endpoints JSON que lo alimentan.
+Cada endpoint ejecuta consultas SQL sobre el Data Warehouse (esquema estrella
+en MySQL local, BD `monitor_conectividad_dwh`) y devuelve ya calculados los KPI
+del dominio y las 5 dimensiones del SLA. Si el DWH no responde, el endpoint
+devuelve HTTP 503 y el front-end muestra "sin datos" en esa sección (no inventa
+valores ni deja la pantalla en blanco).
+
+Reparto de responsabilidades:
+  · MySQL agrega los datos (AVG, COUNT, SUM, GROUP BY, DATEDIFF, TIMESTAMPDIFF).
+  · Este módulo aplica la lógica de negocio (índice de brecha, semáforos del
+    SLA) y arma la respuesta JSON.
+  · db.py sólo abre la conexión y ejecuta el SQL; el navegador sólo pinta.
 
 Las consultas usan EXACTAMENTE los nombres del esquema del README:
   fact_conectividad(conectividad_key, id_origen, FK_rango_etario,
@@ -27,12 +34,16 @@ import db
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "K3W$k3!sdi#k29asdk@xw92d2asd@!ad2")
 
-# Umbrales del SLA (sección 3.1 del informe)
-UMBRAL_UPTIME = 99.0      # %   (mayor es mejor)
-UMBRAL_FRESHNESS = 20     # días (menor es mejor)
-UMBRAL_COMPLETITUD = 97.0 # %   (mayor es mejor)
-UMBRAL_LATENCIA = 5000    # ms  (menor es mejor) — ajústalo al SLA real de tu ETL
-UMBRAL_ERROR = 0.5        # %   (menor es mejor)
+# Umbrales del SLA (tabla de niveles de servicio del informe). Cada dimensión
+# define dos cortes: (verde, amarillo); todo lo que cae fuera es rojo.
+#   · "mayor es mejor" (uptime, completitud):  verde ≥ ... ≥ amarillo > rojo
+#   · "menor es mejor" (freshness, latencia, error): verde ≤ ... ≤ amarillo < rojo
+# La latencia va en milisegundos: 2 min = 120000 ms, 5 min = 300000 ms.
+UMBRAL_UPTIME      = (99.0, 97.0)      # %   SLA-01: verde ≥99,  amarillo ≥97,  rojo <97
+UMBRAL_FRESHNESS   = (20, 30)          # días SLA-02: verde ≤20,  amarillo ≤30,  rojo >30
+UMBRAL_COMPLETITUD = (97.0, 90.0)      # %   SLA-03: verde ≥97,  amarillo ≥90,  rojo <90
+UMBRAL_LATENCIA    = (120000, 300000)  # ms  SLA-04: verde ≤2min, amarillo ≤5min, rojo >5min
+UMBRAL_ERROR       = (0.5, 1.0)        # %   SLA-05: verde ≤0.5,  amarillo ≤1,   rojo >1
 
 # Orden natural de los rangos etarios tal como los siembra el README.
 ORDEN_RANGOS = (
@@ -71,20 +82,30 @@ SQL_ETL_CARGADOS = (
 # ---------------------------------------------------------------------------
 # Utilidades
 # ---------------------------------------------------------------------------
-def estado_min(valor, umbral):
-    """Semáforo cuando 'más alto es mejor' (uptime, completitud)."""
-    if valor >= umbral:
+def estado_mayor_mejor(valor, umbral):
+    """Semáforo para métricas donde MÁS ALTO es mejor (uptime, completitud).
+
+    umbral = (verde, amarillo): 'verde' si valor ≥ verde; 'amarillo' si ≥
+    amarillo; 'rojo' en caso contrario.
+    """
+    verde, amarillo = umbral
+    if valor >= verde:
         return "verde"
-    if valor >= umbral * 0.95:
+    if valor >= amarillo:
         return "amarillo"
     return "rojo"
 
 
-def estado_max(valor, umbral):
-    """Semáforo cuando 'más bajo es mejor' (freshness, latencia, error)."""
-    if valor <= umbral:
+def estado_menor_mejor(valor, umbral):
+    """Semáforo para métricas donde MÁS BAJO es mejor (freshness, latencia, error).
+
+    umbral = (verde, amarillo): 'verde' si valor ≤ verde; 'amarillo' si ≤
+    amarillo; 'rojo' en caso contrario.
+    """
+    verde, amarillo = umbral
+    if valor <= verde:
         return "verde"
-    if valor <= umbral * 1.1:
+    if valor <= amarillo:
         return "amarillo"
     return "rojo"
 
@@ -353,32 +374,30 @@ def sla():
         )
         dias = int(fresh["dias"]) if fresh and fresh["dias"] is not None else 0
 
-        # --- Latencia de la ÚLTIMA ejecución del ETL, en milisegundos ---
-        # Requiere que fecha_inicio/fecha_fin tengan precisión de fracción de
-        # segundo (DATETIME(3)); si son DATETIME normales e iguales, dará 0.
-        lat = db.query_one(
-            """
-            SELECT TIMESTAMPDIFF(MICROSECOND, fecha_inicio, fecha_fin) / 1000.0 AS ms
+        # --- Latencia y tasa de error de la ÚLTIMA ejecución del ETL ---
+        # Cada fila de log_etl es una corrida completa; se toma la más reciente:
+        #   · latencia (ms) = fecha_fin - fecha_inicio. Necesita DATETIME(3);
+        #     con DATETIME normal e inicio == fin daría 0.
+        #   · tasa de error = registros rechazados / registros leídos de ESA
+        #     corrida (cuántas inserciones fallaron en el último ETL).
+        ult = db.query_one(
+            f"""
+            SELECT
+                TIMESTAMPDIFF(MICROSECOND, fecha_inicio, fecha_fin) / 1000.0 AS ms,
+                COALESCE(registros_error, 0) AS errores,
+                {SQL_ETL_LEIDOS}             AS leidos
             FROM log_etl
             WHERE fecha_fin IS NOT NULL
             ORDER BY fecha_fin DESC, log_etl_key DESC
             LIMIT 1
             """
         )
-        latencia_ms = int(round(lat["ms"])) if lat and lat["ms"] is not None else 0
-
-        # --- Tasa de error del ETL: agregada sobre TODAS las ejecuciones ---
-        # (no sólo la última) para que un fallo se refleje aunque la última
-        # corrida haya sido exitosa.
-        err = db.query_one(
-            f"""
-            SELECT SUM(COALESCE(registros_error,0)) AS errores,
-                   SUM({SQL_ETL_LEIDOS})            AS leidos
-            FROM log_etl
-            """
-        )
-        leidos = float(err["leidos"] or 0) if err else 0.0
-        tasa_error = r((float(err["errores"] or 0) / leidos * 100) if leidos else 0.0)
+        if ult:
+            latencia_ms = int(round(ult["ms"])) if ult["ms"] is not None else 0
+            leidos = float(ult["leidos"] or 0)
+            tasa_error = r((float(ult["errores"]) / leidos * 100) if leidos else 0.0)
+        else:
+            latencia_ms, tasa_error = 0, 0.0
 
         # --- Uptime: % de ejecuciones del ETL sin error (sobre todo el historial) ---
         up = db.query_one(
@@ -392,17 +411,19 @@ def sla():
         # --- Completitud global (promedio por campo) ---
         global_pct, _ = _completitud_campos()
 
+        # Cada dimensión lleva su semáforo ya resuelto. 'umbral' expone el corte
+        # verde (primer elemento de la tupla) sólo como referencia para el front.
         dims = {
-            "uptime": {"valor": uptime, "umbral": UMBRAL_UPTIME, "unidad": "%",
-                       "dir": "min", "estado": estado_min(uptime, UMBRAL_UPTIME)},
-            "freshness": {"valor": dias, "umbral": UMBRAL_FRESHNESS, "unidad": " días",
-                          "dir": "max", "estado": estado_max(dias, UMBRAL_FRESHNESS)},
-            "completitud": {"valor": global_pct, "umbral": UMBRAL_COMPLETITUD, "unidad": "%",
-                            "dir": "min", "estado": estado_min(global_pct, UMBRAL_COMPLETITUD)},
-            "latencia": {"valor": latencia_ms, "umbral": UMBRAL_LATENCIA, "unidad": " ms",
-                         "dir": "max", "estado": estado_max(latencia_ms, UMBRAL_LATENCIA)},
-            "error": {"valor": tasa_error, "umbral": UMBRAL_ERROR, "unidad": "%",
-                      "dir": "max", "estado": estado_max(tasa_error, UMBRAL_ERROR)},
+            "uptime": {"valor": uptime, "umbral": UMBRAL_UPTIME[0], "unidad": "%",
+                       "dir": "min", "estado": estado_mayor_mejor(uptime, UMBRAL_UPTIME)},
+            "freshness": {"valor": dias, "umbral": UMBRAL_FRESHNESS[0], "unidad": " días",
+                          "dir": "max", "estado": estado_menor_mejor(dias, UMBRAL_FRESHNESS)},
+            "completitud": {"valor": global_pct, "umbral": UMBRAL_COMPLETITUD[0], "unidad": "%",
+                            "dir": "min", "estado": estado_mayor_mejor(global_pct, UMBRAL_COMPLETITUD)},
+            "latencia": {"valor": latencia_ms, "umbral": UMBRAL_LATENCIA[0], "unidad": " ms",
+                         "dir": "max", "estado": estado_menor_mejor(latencia_ms, UMBRAL_LATENCIA)},
+            "error": {"valor": tasa_error, "umbral": UMBRAL_ERROR[0], "unidad": "%",
+                      "dir": "max", "estado": estado_menor_mejor(tasa_error, UMBRAL_ERROR)},
         }
         dims["global"] = peor_estado([d["estado"] for d in dims.values()])
         return jsonify(dims)

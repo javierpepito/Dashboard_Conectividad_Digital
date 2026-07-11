@@ -18,7 +18,7 @@
     </div>
   </div>
   <div class="top-right">
-    <div class="feed demo" id="feed"><span class="led"></span><span id="feedText">conectando con la API…</span></div>
+    <div class="feed sindatos" id="feed"><span class="led"></span><span id="feedText">conectando con la API…</span></div>
     <button class="btn" id="refreshBtn" onclick="loadAll()" aria-label="Actualizar datos">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
       Actualizar
@@ -97,11 +97,11 @@
   </div>
 </section>
 
-<!-- ============ NOTA DE DESPLIEGUE ============ -->
+<!-- ============ NOTA DE FUENTES ============ -->
 <div class="note">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
   <div>
-    Los KPIs se calculan en la API Flask (<code>/sla</code>, <code>/kpi_principal</code>, <code>/distribucion</code>, <code>/completitud</code>, <code>/historico</code>) consultando el DWH en MySQL. Todos los valores provienen exclusivamente de la base de datos local; si algún endpoint no responde, esa sección muestra <strong>«sin datos desde la BD»</strong>.
+    Este dashboard se alimenta de datos reales recolectados y estadísticas del estudio <strong>«Duodécima Encuesta sobre Acceso, Usos y Usuarios de Internet en Chile»</strong> de SUBTEL, además del <strong>Ranking de la Velocidad de Internet Promedio en Chile</strong> de SUBTEL/OTI.
   </div>
 </div>
 {% endblock %}

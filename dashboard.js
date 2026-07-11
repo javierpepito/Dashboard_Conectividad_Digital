@@ -40,7 +40,7 @@ async function fetchJSON(path){
    ===================================================================== */
 const SLA_DEF = [
   ["uptime","Uptime","≥ 99%"],["freshness","Freshness","≤ 20 días"],
-  ["completitud","Completitud","≥ 97%"],["latencia","Latencia ETL","≤ 5000 ms"],
+  ["completitud","Completitud","≥ 97%"],["latencia","Latencia ETL","≤ 2 min"],
   ["error","Tasa error","≤ 0,5%"]
 ];
 
@@ -138,7 +138,7 @@ function renderCards(k, sla){
     const lat = sla.latencia;
     const latEst = lat.estado || calcEstado(lat.valor,lat.umbral,"max");
     kpiCard("kpiLatencia",{name:"Latencia último ETL",sub:"job Pentaho · log_etl",
-      value:Math.round(lat.valor),unit:" ms",meta:"umbral SLA ≤ 5000 ms",estado:latEst});
+      value:Math.round(lat.valor),unit:" ms",meta:"umbral SLA ≤ 2 min",estado:latEst});
   }else{
     emptyCard("kpiCompletitud","Completitud de campos");
     emptyCard("kpiLatencia","Latencia último ETL");
@@ -272,7 +272,7 @@ function animateNumbers(){
    ===================================================================== */
 function marcarFuente(any, all){
   const f = $("feed");
-  f.className = "feed " + (all ? "live" : "demo");
+  f.className = "feed " + (all ? "live" : "sindatos");
   $("feedText").textContent = all
     ? "datos en vivo"
     : (any ? "datos parciales (algún endpoint sin respuesta)"
