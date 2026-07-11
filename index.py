@@ -200,8 +200,9 @@ def dashboard_js():
 def kpi_principal():
     """KPI principal (índice de brecha digital) + métricas de dominio.
 
-    Cubre 4 de los KPI del tablero:
-      - Índice de brecha digital (AVG con subconsulta)
+    Cubre 5 KPI del tablero:
+      - Índice de brecha digital  (AVG por rango + resta contra la media,
+                                   calculada en Python)
       - Velocidad por rango etario (AVG + GROUP BY)  -> velocidad_rango
       - % sin acceso a internet   (AVG sobre tiene_acceso)
       - Volumen                   (COUNT(*))
@@ -278,7 +279,7 @@ def kpi_principal():
             "velocidad_rango": velocidad_rango,
             "horas_rango": horas_rango,
         })
-    except Exception as e:  # DWH no disponible -> el front usa datos demo
+    except Exception as e:  # DWH sin respuesta -> 503; el front muestra "sin datos"
         return jsonify({"error": str(e)}), 503
 
 
@@ -360,8 +361,8 @@ def sla():
     * latencia (ms)   : duración de la última ejecución del ETL
                         = (fecha_fin - fecha_inicio) de la corrida más reciente,
                         en milisegundos (necesita DATETIME(3), ver README).
-    * error (%)       : tasa de error agregada de TODAS las ejecuciones
-                        = 100 * SUM(registros_error) / SUM(leídos).
+    * error (%)       : tasa de rechazo de la última ejecución del ETL
+                        = 100 * registros_error / registros_leidos.
     """
     try:
         # --- Freshness: días desde el dato más reciente cargado en el hecho ---
