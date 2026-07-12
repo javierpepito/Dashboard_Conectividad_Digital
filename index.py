@@ -45,14 +45,13 @@ UMBRAL_COMPLETITUD = (97.0, 90.0)      # %   SLA-03: verde ≥97,  amarillo ≥9
 UMBRAL_LATENCIA    = (120000, 300000)  # ms  SLA-04: verde ≤2min, amarillo ≤5min, rojo >5min
 UMBRAL_ERROR       = (0.5, 1.0)        # %   SLA-05: verde ≤0.5,  amarillo ≤1,   rojo >1
 
-# Orden natural de los rangos etarios tal como los siembra el README.
+# Orden natural de los rangos etarios.
 ORDEN_RANGOS = (
     "FIELD(re.rango,'Adolescente','Joven Adulto','Adulto Joven',"
     "'Adulto Medio','Adulto Mayor','Persona Mayor')"
 )
 
-# Señal de acceso a internet: la columna tiene_acceso del hecho (0/1), que el
-# ETL ya marca correctamente. Requiere el alias f (fact_conectividad).
+# Señal de acceso a internet: la columna tiene_acceso del hecho (0/1), se requiere alias para su uso.
 SQL_CON_ACCESO = "(f.tiene_acceso = 1)"
 SQL_SIN_ACCESO = "(f.tiene_acceso = 0)"
 
@@ -60,9 +59,8 @@ SQL_SIN_ACCESO = "(f.tiene_acceso = 0)"
 # `registros_actualizados` en NULL, por eso toda la aritmética envuelve las
 # columnas en COALESCE(...,0) (si no, `insertados + NULL` daría NULL).
 
-# Una ejecución del ETL se considera "exitosa" (para uptime) si no registró
-# errores y su estado no indica fallo. Robusto ante las variantes de Pentaho
-# ('EXITOSO', 'OK', 'COMPLETADO', NULL, …).
+# Una ejecución del ETL se considera "exitosa" (para uptime) si no registró errores y su estado no indica fallo. 
+# Robusto ante las variantes de Pentaho ('EXITOSO', 'OK', 'COMPLETADO', NULL, …).
 SQL_ETL_OK = (
     "(COALESCE(registros_error,0) = 0 "
     " AND UPPER(COALESCE(estado,'')) NOT LIKE '%ERROR%' "
